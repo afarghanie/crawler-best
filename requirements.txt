@@ -1,0 +1,6 @@
+streamlit
+crawl4ai
+openai
+pydantic
+python-dotenv
+nest_asyncio
