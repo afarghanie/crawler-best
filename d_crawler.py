@@ -15,19 +15,74 @@ class CrawlerEngine:
     def __init__(self, api_key: str = None):
         self.api_key = api_key
 
-    async def run_summary(self, url: str) -> str:
+    async def run_summary(self, url: str, query: str) -> str:
         """
-        Crawls the URL and returns a markdown summary.
+        Crawls the URL and returns a focused summary based on the user's query.
         """
         logger.info(f"Starting summary crawl for: {url}")
         async with AsyncWebCrawler(verbose=True) as crawler:
-            result = await crawler.arun(url=url)
+            result = await crawler.arun(
+                url=url,
+                magic=True,
+                cache_mode="BYPASS"
+            )
+            
             if not result.success:
                 error_msg = f"Error crawling {url}: {result.error_message}"
                 logger.error(error_msg)
                 return error_msg
-            logger.info("Summary crawl completed successfully")
-            return result.markdown
+            
+            logger.info(f"Summary crawl successful. Content length: {len(result.markdown)} chars")
+            
+            # Use LLM to generate summary
+            from openai import OpenAI
+            
+            logger.info("Calling LLM for smart summarization...")
+            if not self.api_key:
+                return "Error: API Key missing for summarization."
+                
+            client = OpenAI(
+                api_key=self.api_key,
+                base_url="https://openrouter.ai/api/v1"
+            )
+            
+            # Limit content to avoid token limits
+            content_limit = 20000 
+            markdown_chunk = result.markdown[:content_limit]
+            
+            logger.info(f"Generating summary with input length: {len(markdown_chunk)} chars")
+            logger.info(f"Using API Key: {self.api_key[:8]}... (for debug)")
+            
+            prompt = f"""Summarize the following website content based on the user's specific request.
+
+User Request: "{query}"
+
+Website Content (truncated):
+{markdown_chunk}
+
+Instructions:
+- Provide a clear, well-formatted markdown summary.
+- Focus ONLY on what the user asked for.
+- Ignore navigation menus, footers, ads, and irrelevant sidebars.
+- If the answer isn't in the content, say so clearly.
+"""
+
+            try:
+                response = client.chat.completions.create(
+                    model="openai/gpt-5-nano", # Reverting to the model that worked for extraction
+                    messages=[
+                        {"role": "system", "content": "You are a helpful research assistant. Summarize web content based on user queries."},
+                        {"role": "user", "content": prompt}
+                    ]
+                )
+                
+                summary = response.choices[0].message.content
+                logger.info("Smart summary generated successfully")
+                return summary
+                
+            except Exception as e:
+                logger.error(f"LLM summarization failed: {e}")
+                return f"Error generating summary: {e}. Returning raw markdown sample:\n\n{result.markdown[:2000]}"
 
     async def run_extraction(self, url: str, schema: Type[BaseModel]) -> str:
         """

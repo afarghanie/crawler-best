@@ -75,7 +75,7 @@ if run_btn and url and prompt:
         if strategy == StrategyType.SUMMARY:
             # 2. Summary Execution
             status_container.info("🕷️ Crawling for Summary...")
-            result = asyncio.run(crawler.run_summary(url))
+            result = asyncio.run(crawler.run_summary(url, prompt))
             
             st.subheader("Result")
             st.markdown(result)
