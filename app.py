@@ -11,7 +11,7 @@ from d_crawler import CrawlerEngine
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 # Patch asyncio for Streamlit
 nest_asyncio.apply()

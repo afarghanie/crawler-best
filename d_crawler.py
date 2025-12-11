@@ -14,6 +14,25 @@ logger = logging.getLogger(__name__)
 class CrawlerEngine:
     def __init__(self, api_key: str = None):
         self.api_key = api_key
+        
+    def _get_provider_config(self):
+        """
+        Determines the base_url and model to use based on the API Key.
+        Returns (base_url, model)
+        """
+        if not self.api_key:
+             return "https://openrouter.ai/api/v1", "openai/gpt-5-nano"
+             
+        if self.api_key.startswith("gsk_"):
+             return "https://api.groq.com/openai/v1", "llama3-70b-8192"
+        elif self.api_key.startswith("sk-proj-") or self.api_key.startswith("sk-"):
+             # Simple heuristic for OpenAI keys (sk-...) if not OpenRouter (sk-or-...)
+             # Note: OpenRouter keys usually start with sk-or-v1...
+             if not self.api_key.startswith("sk-or-"):
+                 return "https://api.openai.com/v1", "gpt-4o"
+
+        # Default to OpenRouter
+        return "https://openrouter.ai/api/v1", "openai/gpt-5-nano"
 
     async def run_summary(self, url: str, query: str) -> str:
         """
@@ -40,24 +59,28 @@ class CrawlerEngine:
             logger.info("Calling LLM for smart summarization...")
             if not self.api_key:
                 return "Error: API Key missing for summarization."
+            
+            # Use dynamic provider config
+            base_url, model = self._get_provider_config()
+            logger.info(f"Using provider: {base_url} with model: {model}")
                 
             client = OpenAI(
                 api_key=self.api_key,
-                base_url="https://openrouter.ai/api/v1"
+                base_url=base_url
             )
             
-            # Limit content to avoid token limits
-            content_limit = 20000 
+            # Increase limit for summary to capture full article content
+            # gpt-5-nano has a large context window, so we can pass more data
+            content_limit = 100000 
             markdown_chunk = result.markdown[:content_limit]
             
             logger.info(f"Generating summary with input length: {len(markdown_chunk)} chars")
-            logger.info(f"Using API Key: {self.api_key[:8]}... (for debug)")
             
             prompt = f"""Summarize the following website content based on the user's specific request.
 
 User Request: "{query}"
 
-Website Content (truncated):
+Website Content:
 {markdown_chunk}
 
 Instructions:
@@ -69,7 +92,7 @@ Instructions:
 
             try:
                 response = client.chat.completions.create(
-                    model="openai/gpt-5-nano", # Reverting to the model that worked for extraction
+                    model=model,
                     messages=[
                         {"role": "system", "content": "You are a helpful research assistant. Summarize web content based on user queries."},
                         {"role": "user", "content": prompt}
@@ -113,9 +136,11 @@ Instructions:
             # Now call LLM directly on the markdown
             from openai import OpenAI
             
+            base_url, model = self._get_provider_config()
+            
             client = OpenAI(
                 api_key=self.api_key,
-                base_url="https://openrouter.ai/api/v1"
+                base_url=base_url
             )
             
             # Create extraction prompt
@@ -147,7 +172,7 @@ Webpage content:
             
             try:
                 response = client.chat.completions.create(
-                    model="openai/gpt-5-nano",
+                    model=model,
                     messages=[
                         {"role": "system", "content": "You are a data extraction assistant. Extract structured data and return valid JSON only."},
                         {"role": "user", "content": prompt}
