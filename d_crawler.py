@@ -182,7 +182,14 @@ Instructions:
         all_items = []
         
         async with AsyncWebCrawler(verbose=True) as crawler:
-            async for result in await crawler.arun(url, config=config):
+            # arun with deep_crawl configuration returns a list of results
+            results = await crawler.arun(url, config=config)
+            
+            # If results is just a single item (not a list), wrap it
+            if not isinstance(results, list):
+                results = [results]
+                
+            for result in results:
                 if result.success:
                    logger.info(f"Deep Crawl visited: {result.url}")
                    extracted_json_str = await self._extract_with_llm(result.markdown, schema)
