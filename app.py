@@ -5,7 +5,7 @@ import pandas as pd
 import json
 import logging
 import io
-from brain import IntentAnalyzer, SchemaGenerator, StrategyType
+from brain import IntentAnalyzer, SchemaGenerator, StrategyType, ConfigExtractor
 from d_crawler import CrawlerEngine
 
 import os
@@ -84,9 +84,21 @@ if run_btn and url and prompt:
             
         else:
             # 2. Extraction Execution
-            status_container.info("🧠 Generating Schema...")
+            status_container.info("🧠 Generating Schema & Config...")
             generator = SchemaGenerator(api_key)
             schema = generator.generate_schema(prompt)
+            
+            # --- NEW: Extract Configuration (Target Count, Strategy) ---
+            from brain import ConfigExtractor # Import here or at top
+            config_extractor = ConfigExtractor(api_key)
+            config = config_extractor.extract_config(prompt)
+            
+            crawl_strategy = config.get("strategy", "simple")
+            target_count = config.get("target_count", 0)
+            max_pages = config.get("max_pages", 1)
+            
+            st.write(f"**Execution Plan:** Strategy=`{crawl_strategy}`, Target=`{target_count}`, Max Pages=`{max_pages}`")
+            # -----------------------------------------------------------
             
             # Create log container here (in proper position in UI flow)
             st.subheader("Session Logs")
@@ -102,8 +114,14 @@ if run_btn and url and prompt:
             st.write("**Generated Schema:**")
             st.json(schema.model_json_schema())
             
-            status_container.info("🕷️ Crawling & Extracting...")
-            json_result = asyncio.run(crawler.run_extraction(url, schema))
+            status_container.info(f"🕷️ Crawling... ({crawl_strategy})")
+            json_result = asyncio.run(crawler.run_extraction(
+                url=url, 
+                schema=schema,
+                strategy=crawl_strategy,
+                max_pages=max_pages,
+                target_count=target_count
+            ))
             
             st.subheader("Extracted Data")
             try:

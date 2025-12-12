@@ -139,3 +139,67 @@ class SchemaGenerator:
             logger.error(f"Error in schema generation: {e}")
             # Fallback schema
             return create_model('FallbackSchema', content=(str, ...))
+
+class ConfigExtractor:
+    def __init__(self, api_key: str):
+        # Default to OpenRouter if not Groq/OpenAI specific
+        base_url = "https://openrouter.ai/api/v1"
+        self.model = "openai/gpt-5-nano"
+        
+        if api_key.startswith("gsk_"):
+             base_url = "https://api.groq.com/openai/v1"
+             self.model = "llama3-70b-8192"
+        elif api_key.startswith("sk-proj-"):
+             base_url = "https://api.openai.com/v1"
+             self.model = "gpt-4o"
+             
+        self.client = OpenAI(api_key=api_key, base_url=base_url)
+        logger.info(f"ConfigExtractor initialized with model: {self.model}")
+
+    def extract_config(self, prompt: str) -> dict:
+        """
+        Extracts execution configuration (strategy, limits) from the user's prompt.
+        """
+        logger.info(f"Extracting config for prompt: '{prompt}'")
+        system_prompt = """
+        You are a configuration expert for a web crawler. Analyze the user's request and determine the best execution strategy.
+        
+        Strategies:
+        - "simple": Default. Single page, specific data.
+        - "deep": User asks to "explore", "scan site", "crawl deep", "find all pages".
+        - "adaptive": User specifies a quantity (e.g., "get 50 items", "100 quotes") that might span multiple pages.
+        
+        Output JSON:
+        {
+            "strategy": "simple" | "deep" | "adaptive",
+            "target_count": number (0 if not specified),
+            "max_pages": number (1 for simple, 5-10 for others depending on inferred need)
+        }
+        
+        Rules:
+        1. If user asks for a specific count (e.g. "30 items"), set "strategy": "adaptive", "target_count": 30, "max_pages": 10.
+        2. If user asks for "all" items, set "strategy": "deep", "max_pages": 5.
+        3. If vague, default to "simple".
+        """
+        
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"}
+            )
+            config = json.loads(response.choices[0].message.content)
+            
+            # Sanity checks
+            if config.get("strategy") not in ["simple", "deep", "adaptive"]:
+                config["strategy"] = "simple"
+                
+            logger.info(f"Extracted config: {config}")
+            return config
+            
+        except Exception as e:
+            logger.error(f"Error extracting config: {e}")
+            return {"strategy": "simple", "target_count": 0, "max_pages": 1}
