@@ -49,21 +49,29 @@ if logger.hasHandlers():
 
 
 # Main Interface
-col1, col2 = st.columns([2, 1])
+st.text_input("Target URL", placeholder="https://example.com", key="url_input")
+st.text_area("What do you want to extract?", placeholder="e.g., Get me 20 list of second hand car...", key="prompt_input")
+run_btn = st.button("Run Crawler", type="primary")
 
-with col1:
-    url = st.text_input("Target URL", placeholder="https://example.com")
-    prompt = st.text_area("What do you want to extract?", placeholder="e.g., Get the price, address, and listing title.")
-    run_btn = st.button("Run Crawler", type="primary")
-
-with col2:
-    st.subheader("Status")
-    status_container = st.empty()
+# Access values safely
+url = st.session_state.get("url_input", "")
+prompt = st.session_state.get("prompt_input", "")
 
 if run_btn and url and prompt:
+    # --- LOGGING SETUP (Initialize immediately) ---
+    st.subheader("Session Logs")
+    log_container = st.empty()
+    
+    # Setup logging handler
+    handler = StreamlitLogHandler(log_container)
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    # ----------------------------------------------
+
     try:
         # 1. Intent Analysis
-        status_container.info("🧠 Analyzing Intent...")
+        logger.info("🧠 Analyzing Intent...")
         logger.info(f"User initiated crawl. URL: {url}")
         
         analyzer = IntentAnalyzer(api_key)
@@ -74,7 +82,7 @@ if run_btn and url and prompt:
         
         if strategy == StrategyType.SUMMARY:
             # 2. Summary Execution
-            status_container.info("🕷️ Crawling for Summary...")
+            logger.info("🕷️ Crawling for Summary...")
             result = asyncio.run(crawler.run_summary(url, prompt))
             
             st.subheader("Result")
@@ -84,12 +92,11 @@ if run_btn and url and prompt:
             
         else:
             # 2. Extraction Execution
-            status_container.info("🧠 Generating Schema & Config...")
+            logger.info("🧠 Generating Schema & Config...")
             generator = SchemaGenerator(api_key)
             schema = generator.generate_schema(prompt)
             
-            # --- NEW: Extract Configuration (Target Count, Strategy) ---
-            from brain import ConfigExtractor # Import here or at top
+            # --- Extract Configuration ---
             config_extractor = ConfigExtractor(api_key)
             config = config_extractor.extract_config(prompt)
             
@@ -98,23 +105,13 @@ if run_btn and url and prompt:
             max_pages = config.get("max_pages", 1)
             
             st.write(f"**Execution Plan:** Strategy=`{crawl_strategy}`, Target=`{target_count}`, Max Pages=`{max_pages}`")
-            # -----------------------------------------------------------
-            
-            # Create log container here (in proper position in UI flow)
-            st.subheader("Session Logs")
-            log_container = st.empty()
-            
-            # Setup logging handler now
-            handler = StreamlitLogHandler(log_container)
-            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-            handler.setFormatter(formatter)
-            logger.addHandler(handler)
+            # -----------------------------
             
             # Show Generated Schema
-            st.write("**Generated Schema:**")
-            st.json(schema.model_json_schema())
+            with st.expander("View Generated Schema"):
+                st.json(schema.model_json_schema())
             
-            status_container.info(f"🕷️ Crawling... ({crawl_strategy})")
+            logger.info(f"🕷️ Crawling... ({crawl_strategy})")
             json_result = asyncio.run(crawler.run_extraction(
                 url=url, 
                 schema=schema,
@@ -141,23 +138,23 @@ if run_btn and url and prompt:
                 if len(items) > 0:
                     df = pd.DataFrame(items)
                     st.dataframe(df, use_container_width=True)
-                    st.success(f"✅ Extracted {len(items)} items successfully!")
+                    logger.info(f"✅ Extracted {len(items)} items successfully!")
                     
                     # Download buttons
-                    csv = df.to_csv(index=False).encode('utf-8')
-                    st.download_button("Download CSV", csv, "data.csv", "text/csv")
-                    
-                    json_str = json.dumps(items, indent=2)
-                    st.download_button("Download JSON", json_str, "data.json", "application/json")
+                    col_d1, col_d2 = st.columns(2)
+                    with col_d1:
+                        csv = df.to_csv(index=False).encode('utf-8')
+                        st.download_button("Download CSV", csv, "data.csv", "text/csv")
+                    with col_d2:
+                        json_str = json.dumps(items, indent=2)
+                        st.download_button("Download JSON", json_str, "data.json", "application/json")
                 else:
-                    st.warning("No data extracted")
+                    logger.warning("No data extracted")
                     
             except json.JSONDecodeError as e:
-                st.error(f"JSON Parse Error: {e}")
                 logger.error(f"JSON Parse Error: {e}")
                 st.text(json_result)
                 
-        status_container.success("Done!")
         logger.info("Process finished successfully.")
             
     except Exception as e:
